@@ -1,61 +1,63 @@
-﻿from flask import Flask, request
+from flask import Flask, request
 import requests
 import os
-import time
 import json
+import time
 
+# יצירת שרת Flask
 app = Flask(__name__)
 
 # -------------------------
-# CACHE
-# -------------------------
-
-cache = {}
-CACHE_TTL = 30  # שניות
-
-
-# -------------------------
-# פונקציה להבאת קובץ עם CACHE
+# פונקציה להבאת קובץ מימות המשיח
+# עם Retry (ניסיון נוסף אם יש תקלה)
 # -------------------------
 
 def get_text_file(api_token, what):
 
-    cache_key = api_token + "|" + what
-    now = time.time()
-
-    if cache_key in cache:
-
-        cached_data, timestamp = cache[cache_key]
-
-        if now - timestamp < CACHE_TTL:
-            print("CACHE HIT:", cache_key)
-            return cached_data
-
-        else:
-            print("CACHE EXPIRED:", cache_key)
-
-    print("CACHE MISS:", cache_key)
-
     api_url = "https://www.call2all.co.il/ym/api/GetTextFile"
 
-    r = requests.get(
-        api_url,
-        params={
-            "token": api_token,  # <-- התיקון: שם הפרמטר קטן
-            "what": what
-        },
-        timeout=15
-    )
+    max_attempts = 3  # ניסיון ראשון + 2 רטרי
 
-    data = r.json()
+    for attempt in range(max_attempts):
 
-    cache[cache_key] = (data, now)
+        try:
 
-    return data
+            print(f"API TRY {attempt+1} / {max_attempts}")
+
+            r = requests.get(
+                api_url,
+                params={
+                    "token": api_token,
+                    "what": what
+                },
+                timeout=15
+            )
+
+            data = r.json()
+
+            return data
+
+        except Exception as e:
+
+            print("API ERROR:", str(e))
+
+            # אם זה לא הניסיון האחרון → נמתין וננסה שוב
+            if attempt < max_attempts - 1:
+
+                print("WAITING BEFORE RETRY...")
+
+                time.sleep(2)
+
+            else:
+
+                print("API FAILED AFTER ALL ATTEMPTS")
+
+                return {}
 
 
 # -------------------------
 # ROUTER
+# פונקציה שמנתבת את הבקשות
 # -------------------------
 
 @app.route("/", methods=["GET"])
@@ -63,19 +65,19 @@ def router():
 
     print("\n================ NEW REQUEST ================")
 
+    # קבלת כל הפרמטרים
     params = dict(request.args)
 
     print("USER SENT:")
     print(json.dumps(params, ensure_ascii=False, indent=2))
 
+    # סוג הפעולה
     req_type = request.args.get("type", "")
 
+    # מיפוי פעולות לפונקציות
     handlers = {
 
-        "filter_Value": filter_value,
-
-        # כאן ניתן להוסיף פונקציות נוספות בעתיד
-        # "something_else": something_else
+        "filter_Value": filter_value
 
     }
 
@@ -94,6 +96,7 @@ def router():
 
 # -------------------------
 # FILTER VALUE FUNCTION
+# בודקת ערך מתוך קובץ
 # -------------------------
 
 def filter_value():
@@ -118,27 +121,22 @@ def filter_value():
     # -------------------------
 
     if len(token) > 15:
+
         api_token = token
         print("TOKEN MODE: direct")
+
     else:
+
         api_token = f"{ApiDID}:{token}"
         print("TOKEN MODE: ApiDID:token")
 
     print("TOKEN SENT TO API:", api_token)
 
     # -------------------------
-    # קריאת API
+    # קריאה ל-API
     # -------------------------
 
-    try:
-
-        data = get_text_file(api_token, what)
-
-    except Exception as e:
-
-        print("API ERROR:", str(e))
-
-        return "go_to_folder="
+    data = get_text_file(api_token, what)
 
     print("API RESPONSE FROM YEMOT:")
     print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -149,6 +147,7 @@ def filter_value():
 
         return "go_to_folder="
 
+    # תוכן הקובץ
     contents = data.get("contents", "")
 
     print("FILE CONTENTS:")
@@ -174,13 +173,14 @@ def filter_value():
     print("PARSED CONFIG:")
     print(config)
 
+    # חיפוש הערך המבוקש
     key_value = config.get(key, "")
 
     print("SEARCH KEY:", key)
     print("FOUND VALUE:", key_value)
 
     # -------------------------
-    # בדיקה
+    # בדיקה לאן לעבור
     # -------------------------
 
     if key_value == value_a:
@@ -203,7 +203,7 @@ def filter_value():
 
 
 # -------------------------
-# START SERVER
+# הפעלת השרת
 # -------------------------
 
 if __name__ == "__main__":
